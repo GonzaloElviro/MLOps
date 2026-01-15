@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlops-inference
+  namespace: mlops
+  labels:
+    app: mlops-inference
+    component: inference-api
+spec:
+  replicas: 3  # Mínimo para alta disponibilidad
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1  # Pods adicionales durante actualización
+      maxUnavailable: 0  # Cero downtime garantizado
+  selector:
+    matchLabels:
+      app: mlops-inference
+  template:
+    metadata:
+      labels:
+        app: mlops-inference
+        version: "v1.0.0"  # Actualizado automáticamente por CI/CD
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: mlops-service-account
+      containers:
+      - name: inference-api
+        image: <ECR_REPOSITORY_URI>:latest  # Actualizado por CI/CD
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: MODEL_VERSION
+          valueFrom:
+            configMapKeyRef:
+              name: mlops-config
+              key: model_version
+        - name: ENVIRONMENT
+          value: "production"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 1
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlops-inference-service
+  namespace: mlops
+spec:
+  selector:
+    app: mlops-inference
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  type: ClusterIP  # Interno, usar Ingress/ALB para tráfico externo
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mlops-inference-hpa
+  namespace: mlops
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mlops-inference
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

@@ -1,0 +1,6 @@
+# Diagnóstico completo de latencia
+./debug_latency.sh <pod-name>
+
+# Ver métricas en tiempo real
+kubectl port-forward svc/mlops-inference-service 8080:8080
+curl http://localhost:8080/metrics
